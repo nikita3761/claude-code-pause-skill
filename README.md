@@ -1,30 +1,32 @@
-# /pause — безопасная пауза для Claude Code
+# /pause — a safe pause for Claude Code
 
-Скилл для [Claude Code](https://claude.com/claude-code), который по команде `/pause` останавливает сессию
-с множеством задач, субагентов и фоновых процессов в ближайшей безопасной точке. А по `/pause resume`
-продолжает работу с того же места, даже после `/compact` или перезапуска.
+**English** · [Русский](README.ru.md)
 
-Пригодится, когда нужно:
+A [Claude Code](https://claude.com/claude-code) skill. When you type `/pause`, it stops a session that is
+running many tasks, subagents and background processes at the nearest safe point. `/pause resume` picks the
+work up where it stopped, even after `/compact` or a restart.
 
-- сжать контекст через `/compact` посреди большой задачи;
-- закрыть крышку ноутбука или усыпить компьютер;
-- просто прерваться на обед или до вечера.
+Use it when you need to:
 
-## Зачем это нужно
+- compact the context with `/compact` in the middle of a large task;
+- close the laptop lid or put the computer to sleep;
+- step away for lunch or until the evening.
 
-Если просто закрыть ноутбук посреди работы, в итоге может получиться вот что:
+## Why
 
-- **Сон** замораживает процессы и рвёт сетевые соединения. Миграция БД может оборваться на середине,
-  у субагента останется недописанный файл, а запрос к API упадёт после пробуждения.
-- **Компактизация** не останавливает процессы, но стирает из памяти модели, что именно было запущено,
-  кем и зачем. После неё сессия не знает, какие файлы чьи и что делать дальше.
+Closing the laptop in the middle of work can go wrong in two ways:
 
-Скилл решает обе проблемы одинаково: **ничего не должно работать, а всё нужное для продолжения
-должно лежать на диске**.
+- **Sleep** freezes processes and drops network connections. A database migration can break off halfway,
+  a subagent can leave a half-written file, and an API request fails on wake.
+- **Compaction** leaves processes running but erases the model's memory of what was started, by whom and
+  why. Afterwards the session doesn't know which files belong to which task or what comes next.
 
-## Установка
+The skill handles both the same way: **nothing may be running, and everything needed to continue must be
+on disk**.
 
-Скилл — это одна папка `pause` с файлом `SKILL.md`. Её нужно положить в каталог личных скиллов.
+## Installation
+
+The skill is a single `pause` folder containing `SKILL.md`. Put it in your personal skills directory.
 
 ```bash
 git clone https://github.com/nikita3761/claude-code-pause-skill.git /tmp/claude-code-pause-skill
@@ -34,95 +36,94 @@ git clone https://github.com/nikita3761/claude-code-pause-skill.git /tmp/claude-
 mkdir -p ~/.claude/skills && cp -R /tmp/claude-code-pause-skill/pause ~/.claude/skills/
 ```
 
-Чтобы скилл работал только в одном проекте, положите папку в `.claude/skills/` этого проекта.
-Новые сессии Claude Code подхватят скилл автоматически.
+To use it in one project only, put the folder in that project's `.claude/skills/`. New Claude Code sessions
+pick the skill up automatically.
 
-## Использование
+## Usage
 
-| Команда | Что происходит |
+| Command | What happens |
 |---|---|
-| `/pause` | Пауза в ближайшей безопасной точке |
-| `/pause закрою ноутбук через 10 минут` | То же, с учётом вашего срока |
-| `/pause resume` или «продолжай» | Продолжение с места остановки |
+| `/pause` | Pause at the nearest safe point |
+| `/pause closing the laptop in 10 minutes` | The same, within your deadline |
+| `/pause resume` or "continue" | Continue where the work stopped |
 
-Закрывать ноутбук или делать `/compact` можно, когда в ответе появится строка:
+It is safe to close the laptop or run `/compact` once the reply contains this line:
 
 ```
 PAUSED - safe to sleep or /compact.
 ```
 
-## Как это работает
+## How it works
 
-### Пауза
+### Pause
 
-1. **Заморозка.** Новые задачи и субагенты больше не запускаются.
-2. **Первый ответ** перечисляет, что сейчас работает, что прерывать нельзя и сколько примерно ждать.
-3. **Инвентаризация** всего запущенного: субагенты, фоновые команды, таймеры, собственная незаконченная
-   правка, внешние операции.
-4. **Черновик состояния** сразу пишется в `.claude/PAUSE.md` со статусом `DRAINING`. Если крышку
-   закроют раньше времени, следующая сессия всё равно поймёт, где остановились.
-5. **Доведение до безопасной точки**, у каждого вида работы своё правило:
+1. **Freeze.** No new tasks or subagents are started.
+2. **The first reply** lists what is running, what must not be interrupted and roughly how long to wait.
+3. **Inventory** of everything in flight: subagents, background commands, timers, the session's own
+   unfinished edit, external operations.
+4. **A draft checkpoint** is written to `.claude/PAUSE.md` right away with status `DRAINING`. If the lid
+   closes early, the next session still knows where things stopped.
+5. **Drain to a safe point**, with a rule for each kind of work:
 
-   | Что работает | Что с ним делается |
+   | In flight | What happens to it |
    |---|---|
-   | Миграция, деплой, push, публикация | Никогда не прерывается. Пауза не объявляется, пока операция не завершится |
-   | Собственная недописанная правка | Доводится до целостного состояния и не дальше |
-   | Пишущий субагент | Дописывает текущую правку, отчитывается и останавливается |
-   | Читающий субагент | Отдаёт найденное и останавливается |
-   | Тесты на полуправленном коде | Останавливаются с пометкой «перезапустить» |
-   | Dev-сервер, watcher | Останавливается последним, команда перезапуска записывается |
-   | Таймеры, cron, циклы | Отменяются, их текст и расписание записываются |
+   | Migration, deploy, push, publish | Never interrupted. No pause is declared until it finishes |
+   | The session's own half-done edit | Brought to a consistent state, and no further |
+   | Writing subagent | Finishes its current edit, reports, and stops |
+   | Read-only subagent | Hands over its findings so far and stops |
+   | Tests running on half-edited code | Stopped and marked "rerun" |
+   | Dev server, watcher | Stopped last; the restart command is recorded |
+   | Timers, crons, loops | Cancelled; their prompt and schedule are recorded |
 
-6. **Проверка тишины.** Агенты и процессы перечисляются заново, и только после этого статус файла
-   меняется на `PAUSED`.
-7. **Объявление паузы** с итогом: что завершено, что остановлено, что не закоммичено и где.
+6. **Quiescence check.** Agents and processes are listed again, and only then does the file's status
+   change to `PAUSED`.
+7. **The pause is declared** with a summary: what finished, what was stopped, what is uncommitted and where.
 
-### Продолжение
+### Resume
 
-1. Читается `.claude/PAUSE.md`.
-2. Записи сверяются с реальностью: ветка, HEAD, изменённые файлы, worktree, живые процессы, состояние
-   внешних операций.
-3. Любое расхождение (чужой коммит, лишний файл, недоприменённая миграция) выносится вам на решение.
-   Повторно внешние операции без вашего согласия не запускаются.
-4. Прерванные задачи перезапускаются по сохранённым брифам, работа продолжается с записанного
-   следующего шага.
+1. `.claude/PAUSE.md` is read.
+2. The record is checked against reality: branch, HEAD, changed files, worktrees, live processes, the state
+   of external operations.
+3. Any mismatch (a commit made by someone else, an unlisted file, a partly applied migration) is brought to
+   you for a decision. External operations are never re-run without your consent.
+4. Interrupted tasks are re-dispatched from the saved briefs, and work continues from the recorded next step.
 
-## Файл состояния `.claude/PAUSE.md`
+## The checkpoint file `.claude/PAUSE.md`
 
-Файл написан так, чтобы его понял читатель без всякого контекста. Он не коммитится. В нём есть:
+The file is written so that a reader with no context can follow it. It is never committed. It contains:
 
-- цель и ссылка на план;
-- готовые задачи с хешами коммитов;
-- состояние git: ветка, HEAD, изменённые файлы по задачам, worktree;
-- прерванная работа с брифом для перезапуска каждой задачи;
-- не начатые задачи;
-- внешние операции и способ, которым проверен их результат;
-- остановленные процессы и таймеры с командами восстановления;
-- недостоверные результаты, которые нужно получить заново;
-- следующий шаг и открытые вопросы.
+- the goal and a link to the plan;
+- finished tasks with commit hashes;
+- git state: branch, HEAD, changed files grouped by task, worktrees;
+- interrupted work, with a brief to re-dispatch each task;
+- tasks not started yet;
+- external operations and how their result was verified;
+- stopped processes and timers, with commands to restore them;
+- untrusted results that must be produced again;
+- the next step and open questions.
 
-## Ограничения
+## Limitations
 
-- Если в сессии нет инструмента, чтобы отменить запланированный wakeup, скилл не может его отменить.
-  Такой wakeup записывается в файл и может сработать один раз, но работу не возобновит.
-- Внешнюю операцию без известного времени завершения скилл ждёт сколько потребуется. Если уходить надо
-  раньше, он прямо скажет «not safe yet» и назовёт конкретный риск.
-- Скилл рассчитан на проекты в git. Без git раздел о состоянии репозитория будет пустым.
+- If the session has no tool to cancel a scheduled wakeup, the skill cannot cancel it. The wakeup is
+  recorded in the file and may fire once, but it will not resume the work.
+- The skill waits as long as needed for an external operation with no known end time. If you have to leave
+  sooner, it says "not safe yet" and names the concrete risk.
+- The skill assumes a git project. Without git, the repository section of the checkpoint stays empty.
 
-## Как скилл проверялся
+## How it was tested
 
-Скилл написан по методике TDD для скиллов из
-[superpowers](https://github.com/obra/superpowers): сначала прогоны без скилла, потом со скиллом.
+The skill was written with the TDD-for-skills method from
+[superpowers](https://github.com/obra/superpowers): runs without the skill first, then with it.
 
-- **Без скилла** (3 прогона): агенты не трогали миграцию, но каждый клал файл состояния в своё место,
-  ни один не отменял таймеры и не сохранял брифы субагентов для перезапуска.
-- **Со скиллом** (3 прогона паузы и 1 прогон продолжения): путь к файлу, его структура и порядок
-  действий совпали во всех прогонах. При продолжении агент остановился на подложенных расхождениях и не
-  стал повторять миграцию без вопроса.
+- **Without the skill** (3 runs): agents left the migration alone, but each put the checkpoint file in a
+  different place, and none cancelled timers or saved subagent briefs for re-dispatch.
+- **With the skill** (3 pause runs and 1 resume run): the file path, its structure and the order of steps
+  matched in every run. On resume, the agent stopped at the planted mismatches and did not re-run the
+  migration without asking.
 
-Прогоны были письменными сценариями, а не живыми сессиями с настоящим сном компьютера. Если
-найдёте случай, где скилл ошибается, откройте issue.
+The runs were written scenarios, not live sessions with a real computer sleep. If you find a case where the
+skill gets it wrong, please open an issue.
 
-## Лицензия
+## License
 
 [MIT](LICENSE)
